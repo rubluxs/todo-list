@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My To-Do List</title>
+  <!-- Tailwind CSS Play CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            page: '#F5F6F8',
+            card: '#FFFFFF',
+            main: '#14213D',
+            secondary: '#5B6478',
+            primary: '#2F5BEA',
+            done: '#4F8A6B',
+            alert: '#B93815'
+          },
+          maxWidth: {
+            app: '640px'
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-page text-main min-h-screen font-sans antialiased py-10 px-4">
+  <main class="max-w-app mx-auto">
+    <!-- Header -->
+    <header class="mb-6">
+      <h1 class="text-[32px] font-bold text-main leading-tight">My To-Do List</h1>
+    </header>
+
+    <!-- Add Task Form -->
+    <section class="mb-6">
+      <form id="add-todo-form" class="flex gap-2">
+        <label for="todo-input" class="sr-only">Add a task</label>
+        <input
+          id="todo-input"
+          type="text"
+          name="title"
+          maxlength="200"
+          placeholder="Add a task..."
+          required
+          class="flex-1 bg-card border border-gray-300 rounded-lg px-4 py-2.5 text-base text-main placeholder-secondary focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition"
+        />
+        <button
+          type="submit"
+          id="add-btn"
+          class="bg-primary hover:opacity-90 text-white font-medium px-5 py-2.5 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition"
+        >
+          Add task
+        </button>
+      </form>
+    </section>
+
+    <!-- Status & Alerts Area -->
+    <div id="status-area" class="mb-4">
+      <p id="loading-message" class="text-secondary text-base py-2 hidden">Loading tasks...</p>
+      <div id="error-box" class="hidden bg-red-50 border border-alert text-alert px-4 py-3 rounded-lg text-sm mb-3" role="alert">
+        <span id="error-message">Something went wrong.</span>
+      </div>
+    </div>
+
+    <!-- Task List -->
+    <section>
+      <ul id="todo-list" class="space-y-2"></ul>
+      <p id="empty-message" class="text-secondary text-base py-6 text-center hidden">
+        No tasks yet. Add your first one above.
+      </p>
+    </section>
+  </main>
+
+  <script>
+    // ==========================================
+    // 1. Settings
+    // ==========================================
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const API_URL = isLocalhost
+      ? 'http://localhost:3000'
+      : 'https://todo-backend-vibe.onrender.com';
+
+    // ==========================================
+    // 2. API Functions
+    // ==========================================
+    async function apiFetchTodos() {
+      const response = await fetch(`${API_URL}/todos`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to load tasks.');
+      }
+      return await response.json();
+    }
+
+    async function apiAddTodo(title) {
+      const response = await fetch(`${API_URL}/todos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title })
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to add task.');
+      }
+      return await response.json();
+    }
+
+    async function apiUpdateTodo(id, updates) {
+      const response = await fetch(`${API_URL}/todos/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates)
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to update task.');
+      }
+      return await response.json();
+    }
+
+    async function apiDeleteTodo(id) {
+      const response = await fetch(`${API_URL}/todos/${encodeURIComponent(id)}`, {
+        method: 'DELETE'
+      });
+      if (!response.ok && response.status !== 204) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to delete task.');
+      }
+      return true;
+    }
+
+    // ==========================================
+    // 3. Display Functions
+    // ==========================================
+    const todoListElement = document.getElementById('todo-list');
+    const emptyMessageElement = document.getElementById('empty-message');
+    const loadingMessageElement = document.getElementById('loading-message');
+    const errorBoxElement = document.getElementById('error-box');
+    const errorMessageElement = document.getElementById('error-message');
+    const todoInputElement = document.getElementById('todo-input');
+    const addFormElement = document.getElementById('add-todo-form');
+
+    function showError(message) {
+      errorMessageElement.textContent = message;
+      errorBoxElement.classList.remove('hidden');
+    }
+
+    function clearError() {
+      errorBoxElement.classList.add('hidden');
+      errorMessageElement.textContent = '';
+    }
+
+    function setLoading(isLoading) {
+      if (isLoading) {
+        loadingMessageElement.classList.remove('hidden');
+      } else {
+        loadingMessageElement.classList.add('hidden');
+      }
+    }
+
+    function renderTodoList(todos) {
+      todoListElement.innerHTML = '';
+
+      if (!todos || todos.length === 0) {
+        emptyMessageElement.classList.remove('hidden');
+        return;
+      }
+
+      emptyMessageElement.classList.add('hidden');
+      todos.forEach((todo) => {
+        const row = createTodoRow(todo);
+        todoListElement.appendChild(row);
+      });
+    }
+
+    function createTodoRow(todo) {
+      const li = document.createElement('li');
+      li.className = 'bg-card p-4 rounded-lg shadow-sm flex items-center justify-between gap-3 border border-gray-100 transition';
+      li.dataset.id = todo.id;
+
+      // Left container: checkbox and title
+      const leftContainer = document.createElement('div');
+      leftContainer.className = 'flex items-center gap-3 flex-1 min-w-0';
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = Boolean(todo.done);
+      checkbox.className = 'w-5 h-5 text-primary rounded border-gray-300 focus:ring-primary cursor-pointer';
+      checkbox.setAttribute('aria-label', 'Mark task as done');
+
+      const titleSpan = document.createElement('span');
+      // Always use textContent for security (prevents XSS)
+      titleSpan.textContent = todo.title;
+      titleSpan.className = todo.done
+        ? 'text-secondary line-through text-base truncate flex-1'
+        : 'text-main text-base truncate flex-1';
+
+      leftContainer.appendChild(checkbox);
+      leftContainer.appendChild(titleSpan);
+
+      // Right container: delete button
+      const deleteButton = document.createElement('button');
+      deleteButton.type = 'button';
+      deleteButton.textContent = 'Delete';
+      deleteButton.className = 'text-alert hover:underline text-sm font-medium focus:outline-none focus:ring-2 focus:ring-alert focus:ring-offset-1 rounded px-2 py-1';
+      deleteButton.setAttribute('aria-label', `Delete task: ${todo.title}`);
+
+      li.appendChild(leftContainer);
+      li.appendChild(deleteButton);
+
+      // Event: toggle completion
+      checkbox.addEventListener('change', async () => {
+        clearError();
+        const newDone = checkbox.checked;
+        try {
+          await apiUpdateTodo(todo.id, { done: newDone });
+          todo.done = newDone;
+          if (newDone) {
+            titleSpan.className = 'text-secondary line-through text-base truncate flex-1';
+          } else {
+            titleSpan.className = 'text-main text-base truncate flex-1';
+          }
+        } catch (err) {
+          checkbox.checked = !newDone;
+          showError(err.message || 'Could not update task status.');
+        }
+      });
+
+      // Event: delete task
+      deleteButton.addEventListener('click', async () => {
+        clearError();
+        try {
+          await apiDeleteTodo(todo.id);
+          li.remove();
+          if (todoListElement.children.length === 0) {
+            emptyMessageElement.classList.remove('hidden');
+          }
+        } catch (err) {
+          showError(err.message || 'Could not delete task.');
+        }
+      });
+
+      return li;
+    }
+
+    // ==========================================
+    // 4. Event Handlers
+    // ==========================================
+    async function handleAddFormSubmit(event) {
+      event.preventDefault();
+      clearError();
+
+      const title = todoInputElement.value.trim();
+      if (!title) {
+        showError('Please enter a task title.');
+        return;
+      }
+
+      const submitBtn = document.getElementById('add-btn');
+      submitBtn.disabled = true;
+
+      try {
+        const newTodo = await apiAddTodo(title);
+        todoInputElement.value = '';
+        emptyMessageElement.classList.add('hidden');
+        
+        // Add new item at the top of the list
+        const newRow = createTodoRow(newTodo);
+        todoListElement.prepend(newRow);
+      } catch (err) {
+        showError(err.message || 'Could not add task.');
+      } finally {
+        submitBtn.disabled = false;
+        todoInputElement.focus();
+      }
+    }
+
+    // ==========================================
+    // 5. Start-up
+    // ==========================================
+    async function initApp() {
+      addFormElement.addEventListener('submit', handleAddFormSubmit);
+      setLoading(true);
+      clearError();
+
+      try {
+        const todos = await apiFetchTodos();
+        renderTodoList(todos);
+      } catch (err) {
+        showError(err.message || 'Unable to connect to server. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', initApp);
+  </script>
+</body>
+</html>
